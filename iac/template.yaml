@@ -33,7 +33,7 @@ Resources:
       FunctionName: TeeCalcLambda
       Handler: tee_calc_lambda.lambda_handler
       Runtime: python3.9
-      CodeUri: src/
+      CodeUri: ../src
       Policies: # Deliverable 2.1: Lambda IAM Role Permissions
         - DynamoDBReadPolicy:
             TableName: !Ref CourseData
