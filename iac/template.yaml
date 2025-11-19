@@ -165,11 +165,13 @@ Resources:
                 passthroughBehavior: WHEN_NO_MATCH
                 httpMethod: POST
                 type: AWS
+                requestParameters:
+                  integration.request.header.Content-Type: "'application/x-amz-json-1.0'"
                 requestTemplates:
                   application/json: |
                     {
                       "input": "$input.json('$')",
-                      "stateMachineArn": "**"**${TeeAdviceWorkflow}**"**
+                      "stateMachineArn": "${TeeAdviceWorkflow}"
                     }
               responses:
                 '200':

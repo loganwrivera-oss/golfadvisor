@@ -129,7 +129,7 @@ Resources:
                 type: AWS
                 requestTemplates:
                   application/json: "{\n  \"input\": \"$input.json('$')\",\n  \"stateMachineArn\"\
-                    : \"${TeeAdviceWorkflow}\"\n}\n"
+                    : \"**\"**${TeeAdviceWorkflow}**\"**\n}\n"
               responses:
                 '200':
                   description: 200 response
