@@ -30,7 +30,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: TeeCalcLambda
-      CodeUri: s3://golf-caddie-artifacts-2025/448902da481c68a34076e4bf8273f53e
+      CodeUri: s3://golf-caddie-artifacts-2025/45f597a716fd1ad3c19986b81a808413
       Handler: lambda_function.lambda_handler
       Policies:
       - Statement:
