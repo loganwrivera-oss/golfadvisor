@@ -79,8 +79,7 @@ Resources:
           \ Workflow\",\n  \"StartAt\": \"CalculateHandicap\",\n  \"States\": {\n\
           \    \"CalculateHandicap\": {\n      \"Type\": \"Task\",\n      \"Resource\"\
           : \"arn:aws:states:::lambda:invoke\",\n      \"Parameters\": {\n       \
-          \ # CRITICAL FIX: Force the substitution of the full Lambda ARN here\n \
-          \       \"FunctionName\": \"arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${TeeCalcLambda}\"\
+          \ \"FunctionName\": \"arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${TeeCalcLambda}\"\
           ,\n        \"Payload.$\": \"$\"\n      },\n      \"Retry\": [{\n       \
           \   \"ErrorEquals\": [\"Lambda.ServiceException\", \"Lambda.AWSLambdaException\"\
           , \"Lambda.SdkClientException\"],\n          \"IntervalSeconds\": 2,\n \
