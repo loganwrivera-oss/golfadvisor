@@ -1,103 +1,61 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31 # Use SAM to simplify Lambda and API Gateway definitions
+Transform: AWS::Serverless-2016-10-31
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 512
 
 Parameters:
-  ParValue:
-    Type: Number
-    Default: 72 # Default Par for WHS calculation
+  S3ArtifactBucket:
+    Type: String
+    Description: S3 bucket for deployment artifacts.
 
 Resources:
-  # Deliverable 1.4: DynamoDB Table
-  CourseData:
+  # --------------------------------------------------------------------------
+  # 1. DynamoDB Table for Storing Handicap Calculations
+  # --------------------------------------------------------------------------
+  GolfCaddieTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: CourseData
-      KeySchema:
-        - AttributeName: CourseID
-          KeyType: HASH
-        - AttributeName: TeeMarker
-          KeyType: RANGE
+      TableName: GolfCaddieData
       AttributeDefinitions:
         - AttributeName: CourseID
           AttributeType: S
-        - AttributeName: TeeMarker
-          AttributeType: S
+      KeySchema:
+        - AttributeName: CourseID
+          KeyType: HASH
       ProvisionedThroughput:
         ReadCapacityUnits: 5
         WriteCapacityUnits: 5
+      TimeToLiveSpecification:
+        AttributeName: expirationTime
+        Enabled: true
 
-  # Deliverable 2.3: Lambda Function (Code in src/tee_calc_lambda.py)
+  # --------------------------------------------------------------------------
+  # 2. Lambda Function to Calculate Handicap (First Step in Workflow)
+  # --------------------------------------------------------------------------
   TeeCalcLambda:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: TeeCalcLambda
-      Handler: tee_calc_lambda.lambda_handler
-      Runtime: python3.9
-      CodeUri: ../src
-      Policies: # Deliverable 2.1: Lambda IAM Role Permissions
-        - DynamoDBReadPolicy:
-            TableName: !Ref CourseData
+      CodeUri: src/
+      Handler: lambda_function.lambda_handler
+      Policies:
         - Statement:
-            Effect: Allow
-            Action: "logs:*"
-            Resource: "*"
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+              Resource: !GetAtt GolfCaddieTable.Arn
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref GolfCaddieTable
 
-  # Deliverable 2.2: Step Functions State Machine (Orchestrator)
-  TeeAdviceWorkflow:
-    Type: AWS::StepFunctions::StateMachine
-    Properties:
-      StateMachineName: TeeAdviceWorkflow
-      RoleArn: !GetAtt SFExecutionRole.Arn # SF execution role defined below
-      DefinitionString:
-        !Sub |
-          {
-            "StartAt": "CheckForIndex",
-            "States": {
-              "CheckForIndex": {
-                "Type": "Choice",
-                "Choices": [
-                  {
-                    "Variable": "$.handicapIndex",
-                    "IsPresent": true,
-                    "Next": "CalculateHandicap"
-                  }
-                ],
-                "Default": "IndexMissingError"
-              },
-              "CalculateHandicap": {
-                "Type": "Task",
-                "Resource": "arn:aws:states:::lambda:invoke",
-                "Parameters": {
-                  "FunctionName": "${TeeCalcLambda}",
-                  "Payload.$": "$"
-                },
-                "Next": "AISuggestionTask"
-              },
-              "AISuggestionTask": {
-                "Type": "Task",
-                "Resource": "arn:aws:states:::bedrock:invokeModel",
-                "Parameters": {
-                  "ModelId": "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet",
-                  "ContentType": "application/json",
-                  "Accept": "application/json",
-                  "Body": {
-                    "prompt.$": "States.Format('Based on Course Handicap {}, suggest a tee strategy.', $.courseHandicap)"
-                  }
-                },
-                "Next": "SuccessState"
-              },
-              "IndexMissingError": {
-                "Type": "Fail",
-                "Error": "MissingHandicapIndex",
-                "Cause": "Handicap Index is required for this path."
-              },
-              "SuccessState": {
-                "Type": "Succeed"
-              }
-            }
-          }
-
-  # Deliverable 2.1: IAM Role for Step Functions Execution (SF needs permissions for Lambda & Bedrock)
+  # --------------------------------------------------------------------------
+  # 3. Step Functions Role (Execution Role)
+  # --------------------------------------------------------------------------
   SFExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -106,7 +64,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: !Sub "states.${AWS::Region}.amazonaws.com"
+              Service: states.amazonaws.com
             Action: sts:AssumeRole
       Policies:
         - PolicyName: SFInvokePolicy
@@ -119,7 +77,61 @@ Resources:
                   - bedrock:InvokeModel
                 Resource: "*"
 
-  # Deliverable 2.1: API Gateway (HTTP API definition)
+  # --------------------------------------------------------------------------
+  # 4. Step Function State Machine (The Workflow Orchestrator)
+  # --------------------------------------------------------------------------
+  TeeAdviceWorkflow:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: TeeAdviceWorkflow
+      RoleArn: !GetAtt SFExecutionRole.Arn
+      DefinitionString: |
+        {
+          "Comment": "Golf Caddie Handicap Calculation and AI Advice Workflow",
+          "StartAt": "CalculateHandicap",
+          "States": {
+            "CalculateHandicap": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Parameters": {
+                "FunctionName": "${TeeCalcLambda}",
+                "Payload.$": "$"
+              },
+              "Retry": [{
+                  "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 6,
+                  "BackoffRate": 2
+              }],
+              "Catch": [{
+                  "ErrorEquals": ["States.ALL"],
+                  "Next": "FailedState"
+              }],
+              "Next": "AISuggestionTask"
+            },
+            "AISuggestionTask": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::bedrock:invokeModel",
+              "Parameters": {
+                "ModelId": "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet",
+                "ContentType": "application/json",
+                "Accept": "application/json",
+                "Body": {
+                  "prompt.$": "States.Format('Based on Course Handicap {}, suggest a tee strategy.', $.courseHandicap)"
+                }
+              },
+              "End": true
+            },
+            "FailedState": {
+              "Type": "Fail",
+              "Cause": "The workflow failed to complete successfully."
+            }
+          }
+        }
+
+  # --------------------------------------------------------------------------
+  # 5. API Gateway (Entry Point)
+  # --------------------------------------------------------------------------
   TeeAdviceAPI:
     Type: AWS::Serverless::Api
     Properties:
@@ -132,6 +144,15 @@ Resources:
         paths:
           /advice:
             post:
+              consumes:
+                - application/json
+              produces:
+                - application/json
+              parameters:
+                - in: "body"
+                  name: "body"
+                  schema:
+                    $ref: "#/definitions/HandicapInput"
               x-amazon-apigateway-integration:
                 uri:
                   !Sub "arn:aws:apigateway:${AWS::Region}:states:action/StartExecution"
@@ -139,15 +160,42 @@ Resources:
                 passthroughBehavior: WHEN_NO_MATCH
                 httpMethod: POST
                 type: AWS
-                requestTemplates: # <--- START OF NEW CODE
+                requestTemplates:
                   application/json: |
                     {
-                      "input": "$util.escapeJavaScript($input.body)",
+                      "input": "$input.json('$')",
                       "stateMachineArn": "${TeeAdviceWorkflow}"
-                    } # <--- END OF NEW CODE
-              responses: {}
+                    }
+              responses:
+                '200':
+                  description: "200 response"
+                  schema:
+                    $ref: "#/definitions/HandicapOutput"
+        definitions:
+          HandicapInput:
+            type: object
+            properties:
+              courseID:
+                type: string
+              teeMarker:
+                type: string
+              rating:
+                type: number
+              slope:
+                type: integer
+              handicapIndex:
+                type: number
+          HandicapOutput:
+            type: object
+            properties:
+              courseHandicap:
+                type: integer
+              advice:
+                type: string
 
-  # Deliverable 2.1: IAM Role for APIGW to call Step Functions
+  # --------------------------------------------------------------------------
+  # 6. API Gateway Role (Used by API Gateway to call Step Functions)
+  # --------------------------------------------------------------------------
   APIGWRole:
     Type: AWS::IAM::Role
     Properties:
@@ -167,6 +215,9 @@ Resources:
                 Action: states:StartExecution
                 Resource: !GetAtt TeeAdviceWorkflow.Arn
 
+# --------------------------------------------------------------------------
+# 7. Stack Outputs (To retrieve the public API URL)
+# --------------------------------------------------------------------------
 Outputs:
   TeeAdviceAPIEndpoint:
     Description: "API Gateway URL for the Tee Advice Workflow"
