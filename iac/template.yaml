@@ -169,7 +169,7 @@ Resources:
                   application/json: |
                     {
                       "input": "$input.json('$')",
-                      "stateMachineArn": "${TeeAdviceWorkflow}"
+                      "stateMachineArn": "**"**${TeeAdviceWorkflow}**"**
                     }
               responses:
                 '200':
