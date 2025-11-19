@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Parameters:
+  ParValue:
+    Type: Number
+    Default: 72
+Resources:
+  CourseData:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: CourseData
+      KeySchema:
+      - AttributeName: CourseID
+        KeyType: HASH
+      - AttributeName: TeeMarker
+        KeyType: RANGE
+      AttributeDefinitions:
+      - AttributeName: CourseID
+        AttributeType: S
+      - AttributeName: TeeMarker
+        AttributeType: S
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+  TeeCalcLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: TeeCalcLambda
+      Handler: tee_calc_lambda.lambda_handler
+      Runtime: python3.9
+      CodeUri: s3://golf-caddie-artifacts-2025/448902da481c68a34076e4bf8273f53e
+      Policies:
+      - DynamoDBReadPolicy:
+          TableName:
+            Ref: CourseData
+      - Statement:
+          Effect: Allow
+          Action: logs:*
+          Resource: '*'
+  TeeAdviceWorkflow:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: TeeAdviceWorkflow
+      RoleArn:
+        Fn::GetAtt:
+        - SFExecutionRole
+        - Arn
+      DefinitionString:
+        Fn::Sub: "{\n  \"StartAt\": \"CheckForIndex\",\n  \"States\": {\n    \"CheckForIndex\"\
+          : {\n      \"Type\": \"Choice\",\n      \"Choices\": [\n        {\n    \
+          \      \"Variable\": \"$.handicapIndex\",\n          \"IsPresent\": true,\n\
+          \          \"Next\": \"CalculateHandicap\"\n        }\n      ],\n      \"\
+          Default\": \"IndexMissingError\"\n    },\n    \"CalculateHandicap\": {\n\
+          \      \"Type\": \"Task\",\n      \"Resource\": \"arn:aws:states:::lambda:invoke\"\
+          ,\n      \"Parameters\": {\n        \"FunctionName\": \"${TeeCalcLambda}\"\
+          ,\n        \"Payload.$\": \"$\"\n      },\n      \"Next\": \"AISuggestionTask\"\
+          \n    },\n    \"AISuggestionTask\": {\n      \"Type\": \"Task\",\n     \
+          \ \"Resource\": \"arn:aws:states:::bedrock:invokeModel\",\n      \"Parameters\"\
+          : {\n        \"modelId\": \"arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-v2\"\
+          ,\n        \"contentType\": \"application/json\",\n        \"accept\": \"\
+          application/json\",\n        \"body\": {\n          \"prompt.$\": \"States.Format('Based\
+          \ on Course Handicap {}, suggest a tee strategy.', $.courseHandicap)\"\n\
+          \        }\n      },\n      \"Next\": \"SuccessState\"\n    },\n    \"IndexMissingError\"\
+          : {\n      \"Type\": \"Fail\",\n      \"Error\": \"MissingHandicapIndex\"\
+          ,\n      \"Cause\": \"Handicap Index is required for this path.\"\n    },\n\
+          \    \"SuccessState\": {\n      \"Type\": \"Succeed\"\n    }\n  }\n}\n"
+  SFExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+              Fn::Sub: states.${AWS::Region}.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: SFInvokePolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - lambda:InvokeFunction
+            - bedrock:InvokeModel
+            Resource: '*'
+  TeeAdviceAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: TeeAdviceAPI
+      StageName: Prod
+      DefinitionBody:
+        swagger: '2.0'
+        info:
+          title: TeeAdviceAPI
+        paths:
+          /advice:
+            post:
+              x-amazon-apigateway-integration:
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:states:action/StartExecution
+                credentials:
+                  Fn::GetAtt:
+                  - APIGWRole
+                  - Arn
+                passthroughBehavior: WHEN_NO_MATCH
+                httpMethod: POST
+                type: AWS
+              responses: {}
+  APIGWRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: apigateway.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: APIGWInvokeSFPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action: states:StartExecution
+            Resource:
+              Fn::GetAtt:
+              - TeeAdviceWorkflow
+              - Arn
