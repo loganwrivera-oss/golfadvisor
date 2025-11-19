@@ -40,7 +40,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: TeeCalcLambda
-      CodeUri: src/
+      CodeUri: ../src/
       Handler: lambda_function.lambda_handler
       Policies:
         - Statement:
