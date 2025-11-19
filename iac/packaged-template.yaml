@@ -1,69 +1,51 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 512
 Parameters:
-  ParValue:
-    Type: Number
-    Default: 72
+  S3ArtifactBucket:
+    Type: String
+    Description: S3 bucket for deployment artifacts.
 Resources:
-  CourseData:
+  GolfCaddieTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: CourseData
-      KeySchema:
-      - AttributeName: CourseID
-        KeyType: HASH
-      - AttributeName: TeeMarker
-        KeyType: RANGE
+      TableName: GolfCaddieData
       AttributeDefinitions:
       - AttributeName: CourseID
         AttributeType: S
-      - AttributeName: TeeMarker
-        AttributeType: S
+      KeySchema:
+      - AttributeName: CourseID
+        KeyType: HASH
       ProvisionedThroughput:
         ReadCapacityUnits: 5
         WriteCapacityUnits: 5
+      TimeToLiveSpecification:
+        AttributeName: expirationTime
+        Enabled: true
   TeeCalcLambda:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: TeeCalcLambda
-      Handler: tee_calc_lambda.lambda_handler
-      Runtime: python3.9
       CodeUri: s3://golf-caddie-artifacts-2025/448902da481c68a34076e4bf8273f53e
+      Handler: lambda_function.lambda_handler
       Policies:
-      - DynamoDBReadPolicy:
-          TableName:
-            Ref: CourseData
       - Statement:
-          Effect: Allow
-          Action: logs:*
-          Resource: '*'
-  TeeAdviceWorkflow:
-    Type: AWS::StepFunctions::StateMachine
-    Properties:
-      StateMachineName: TeeAdviceWorkflow
-      RoleArn:
-        Fn::GetAtt:
-        - SFExecutionRole
-        - Arn
-      DefinitionString:
-        Fn::Sub: "{\n  \"StartAt\": \"CheckForIndex\",\n  \"States\": {\n    \"CheckForIndex\"\
-          : {\n      \"Type\": \"Choice\",\n      \"Choices\": [\n        {\n    \
-          \      \"Variable\": \"$.handicapIndex\",\n          \"IsPresent\": true,\n\
-          \          \"Next\": \"CalculateHandicap\"\n        }\n      ],\n      \"\
-          Default\": \"IndexMissingError\"\n    },\n    \"CalculateHandicap\": {\n\
-          \      \"Type\": \"Task\",\n      \"Resource\": \"arn:aws:states:::lambda:invoke\"\
-          ,\n      \"Parameters\": {\n        \"FunctionName\": \"${TeeCalcLambda}\"\
-          ,\n        \"Payload.$\": \"$\"\n      },\n      \"Next\": \"AISuggestionTask\"\
-          \n    },\n    \"AISuggestionTask\": {\n      \"Type\": \"Task\",\n     \
-          \ \"Resource\": \"arn:aws:states:::bedrock:invokeModel\",\n      \"Parameters\"\
-          : {\n        \"ModelId\": \"arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet\"\
-          ,\n        \"ContentType\": \"application/json\",\n        \"Accept\": \"\
-          application/json\",\n        \"Body\": {\n          \"prompt.$\": \"States.Format('Based\
-          \ on Course Handicap {}, suggest a tee strategy.', $.courseHandicap)\"\n\
-          \        }\n      },\n      \"Next\": \"SuccessState\"\n    },\n    \"IndexMissingError\"\
-          : {\n      \"Type\": \"Fail\",\n      \"Error\": \"MissingHandicapIndex\"\
-          ,\n      \"Cause\": \"Handicap Index is required for this path.\"\n    },\n\
-          \    \"SuccessState\": {\n      \"Type\": \"Succeed\"\n    }\n  }\n}\n"
+        - Effect: Allow
+          Action:
+          - dynamodb:PutItem
+          - dynamodb:GetItem
+          Resource:
+            Fn::GetAtt:
+            - GolfCaddieTable
+            - Arn
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME:
+            Ref: GolfCaddieTable
   SFExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -72,8 +54,7 @@ Resources:
         Statement:
         - Effect: Allow
           Principal:
-            Service:
-              Fn::Sub: states.${AWS::Region}.amazonaws.com
+            Service: states.amazonaws.com
           Action: sts:AssumeRole
       Policies:
       - PolicyName: SFInvokePolicy
@@ -85,6 +66,37 @@ Resources:
             - lambda:InvokeFunction
             - bedrock:InvokeModel
             Resource: '*'
+  TeeAdviceWorkflow:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: TeeAdviceWorkflow
+      RoleArn:
+        Fn::GetAtt:
+        - SFExecutionRole
+        - Arn
+      DefinitionString:
+        Fn::Sub: "{\n  \"Comment\": \"Golf Caddie Handicap Calculation and AI Advice\
+          \ Workflow\",\n  \"StartAt\": \"CalculateHandicap\",\n  \"States\": {\n\
+          \    \"CalculateHandicap\": {\n      \"Type\": \"Task\",\n      \"Resource\"\
+          : \"arn:aws:states:::lambda:invoke\",\n      \"Parameters\": {\n       \
+          \ # CRITICAL FIX: Force the substitution of the full Lambda ARN here\n \
+          \       \"FunctionName\": \"arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${TeeCalcLambda}\"\
+          ,\n        \"Payload.$\": \"$\"\n      },\n      \"Retry\": [{\n       \
+          \   \"ErrorEquals\": [\"Lambda.ServiceException\", \"Lambda.AWSLambdaException\"\
+          , \"Lambda.SdkClientException\"],\n          \"IntervalSeconds\": 2,\n \
+          \         \"MaxAttempts\": 6,\n          \"BackoffRate\": 2\n      }],\n\
+          \      \"Catch\": [{\n          \"ErrorEquals\": [\"States.ALL\"],\n   \
+          \       \"Next\": \"FailedState\"\n      }],\n      \"Next\": \"AISuggestionTask\"\
+          \n    },\n    \"AISuggestionTask\": {\n      \"Type\": \"Task\",\n     \
+          \ \"Resource\": \"arn:aws:states:::bedrock:invokeModel\",\n      \"Parameters\"\
+          : {\n        \"ModelId\": \"arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet\"\
+          ,\n        \"ContentType\": \"application/json\",\n        \"Accept\": \"\
+          application/json\",\n        \"Body\": {\n          \"prompt.$\": \"States.Format('Based\
+          \ on Course Handicap {}, suggest a tee strategy.', $.courseHandicap)\"\n\
+          \        }\n      },\n      \"Next\": \"SuccessState\"\n    },\n    \"SuccessState\"\
+          : {\n      \"Type\": \"Succeed\"\n    },\n    \"FailedState\": {\n     \
+          \ \"Type\": \"Fail\",\n      \"Cause\": \"The workflow failed to complete\
+          \ successfully.\"\n    }\n  }\n}\n"
   TeeAdviceAPI:
     Type: AWS::Serverless::Api
     Properties:
@@ -97,6 +109,15 @@ Resources:
         paths:
           /advice:
             post:
+              consumes:
+              - application/json
+              produces:
+              - application/json
+              parameters:
+              - in: body
+                name: body
+                schema:
+                  $ref: '#/definitions/HandicapInput'
               x-amazon-apigateway-integration:
                 uri:
                   Fn::Sub: arn:aws:apigateway:${AWS::Region}:states:action/StartExecution
@@ -108,15 +129,39 @@ Resources:
                 httpMethod: POST
                 type: AWS
                 requestTemplates:
-                  application/json: "{\n  \"input\": \"$util.escapeJavaScript($input.body)\"\
-                    ,\n  \"stateMachineArn\": \"${TeeAdviceWorkflow}\"\n} # <--- END\
-                    \ OF NEW CODE\n"
-              responses: {}
+                  application/json: "{\n  \"input\": \"$input.json('$')\",\n  \"stateMachineArn\"\
+                    : \"${TeeAdviceWorkflow}\"\n}\n"
+              responses:
+                '200':
+                  description: 200 response
+                  schema:
+                    $ref: '#/definitions/HandicapOutput'
+        definitions:
+          HandicapInput:
+            type: object
+            properties:
+              courseID:
+                type: string
+              teeMarker:
+                type: string
+              rating:
+                type: number
+              slope:
+                type: integer
+              handicapIndex:
+                type: number
+          HandicapOutput:
+            type: object
+            properties:
+              courseHandicap:
+                type: integer
+              advice:
+                type: string
   APIGWRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: '2012-01-17'
         Statement:
         - Effect: Allow
           Principal:
