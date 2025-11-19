@@ -91,11 +91,11 @@ Resources:
           : {\n        \"ModelId\": \"arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet\"\
           ,\n        \"ContentType\": \"application/json\",\n        \"Accept\": \"\
           application/json\",\n        \"Body\": {\n          \"prompt.$\": \"States.Format('Based\
-          \ on Course Handicap {}, suggest a tee strategy.', $.courseHandicap)\"\n\
-          \        }\n      },\n      \"Next\": \"SuccessState\"\n    },\n    \"SuccessState\"\
-          : {\n      \"Type\": \"Succeed\"\n    },\n    \"FailedState\": {\n     \
-          \ \"Type\": \"Fail\",\n      \"Cause\": \"The workflow failed to complete\
-          \ successfully.\"\n    }\n  }\n}\n"
+          \ on Course Handicap {}, suggest a tee strategy.', $.Payload.courseHandicap)\"\
+          \n        }\n      },\n      \"Next\": \"SuccessState\"\n    },\n    \"\
+          SuccessState\": {\n      \"Type\": \"Succeed\"\n    },\n    \"FailedState\"\
+          : {\n      \"Type\": \"Fail\",\n      \"Cause\": \"The workflow failed to\
+          \ complete successfully.\"\n    }\n  }\n}\n"
   TeeAdviceAPI:
     Type: AWS::Serverless::Api
     Properties:

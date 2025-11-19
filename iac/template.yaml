@@ -115,7 +115,7 @@ Resources:
                 "Type": "Task",
                 "Resource": "arn:aws:states:::bedrock:invokeModel",
                 "Parameters": {
-                  "ModelId": "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet",
+                  "ModelId": "anthropic.claude-3-5-sonnet",
                   "ContentType": "application/json",
                   "Accept": "application/json",
                   "Body": {
