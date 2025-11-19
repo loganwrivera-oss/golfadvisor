@@ -56,7 +56,7 @@ Resources:
           ,\n        \"Payload.$\": \"$\"\n      },\n      \"Next\": \"AISuggestionTask\"\
           \n    },\n    \"AISuggestionTask\": {\n      \"Type\": \"Task\",\n     \
           \ \"Resource\": \"arn:aws:states:::bedrock:invokeModel\",\n      \"Parameters\"\
-          : {\n        \"modelId\": \"arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-v2\"\
+          : {\n        \"ModelId\": \"arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-v2\"\
           ,\n        \"contentType\": \"application/json\",\n        \"accept\": \"\
           application/json\",\n        \"Body\": {\n          \"prompt.$\": \"States.Format('Based\
           \ on Course Handicap {}, suggest a tee strategy.', $.courseHandicap)\"\n\
