@@ -139,6 +139,12 @@ Resources:
                 passthroughBehavior: WHEN_NO_MATCH
                 httpMethod: POST
                 type: AWS
+                requestTemplates: # <--- START OF NEW CODE
+                  application/json: |
+                    {
+                      "input": "$util.escapeJavaScript($input.body)",
+                      "stateMachineArn": "${TeeAdviceWorkflow}"
+                    } # <--- END OF NEW CODE
               responses: {}
 
   # Deliverable 2.1: IAM Role for APIGW to call Step Functions

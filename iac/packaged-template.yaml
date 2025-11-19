@@ -129,3 +129,8 @@ Resources:
               Fn::GetAtt:
               - TeeAdviceWorkflow
               - Arn
+Outputs:
+  TeeAdviceAPIEndpoint:
+    Description: API Gateway URL for the Tee Advice Workflow
+    Value:
+      Fn::Sub: https://${TeeAdviceAPI}.execute-api.${AWS::Region}.amazonaws.com/Prod/advice
