@@ -79,7 +79,7 @@ Resources:
                 "Parameters": {
                   "ModelId": "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-v2",
                   "ContentType": "application/json",
-                  "accept": "application/json",
+                  "Accept": "application/json",
                   "Body": {
                     "prompt.$": "States.Format('Based on Course Handicap {}, suggest a tee strategy.', $.courseHandicap)"
                   }
