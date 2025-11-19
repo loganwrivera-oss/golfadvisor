@@ -107,6 +107,10 @@ Resources:
                 passthroughBehavior: WHEN_NO_MATCH
                 httpMethod: POST
                 type: AWS
+                requestTemplates:
+                  application/json: "{\n  \"input\": \"$util.escapeJavaScript($input.body)\"\
+                    ,\n  \"stateMachineArn\": \"${TeeAdviceWorkflow}\"\n} # <--- END\
+                    \ OF NEW CODE\n"
               responses: {}
   APIGWRole:
     Type: AWS::IAM::Role
