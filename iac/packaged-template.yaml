@@ -58,7 +58,7 @@ Resources:
           \ \"Resource\": \"arn:aws:states:::bedrock:invokeModel\",\n      \"Parameters\"\
           : {\n        \"modelId\": \"arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-v2\"\
           ,\n        \"contentType\": \"application/json\",\n        \"accept\": \"\
-          application/json\",\n        \"body\": {\n          \"prompt.$\": \"States.Format('Based\
+          application/json\",\n        \"Body\": {\n          \"prompt.$\": \"States.Format('Based\
           \ on Course Handicap {}, suggest a tee strategy.', $.courseHandicap)\"\n\
           \        }\n      },\n      \"Next\": \"SuccessState\"\n    },\n    \"IndexMissingError\"\
           : {\n      \"Type\": \"Fail\",\n      \"Error\": \"MissingHandicapIndex\"\

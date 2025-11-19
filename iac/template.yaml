@@ -77,7 +77,7 @@ Resources:
                 "Type": "Task",
                 "Resource": "arn:aws:states:::bedrock:invokeModel",
                 "Parameters": {
-                  "modelId": "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-v2",
+                  "ModelId": "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-v2",
                   "contentType": "application/json",
                   "accept": "application/json",
                   "Body": {
