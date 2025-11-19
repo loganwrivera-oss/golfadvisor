@@ -127,9 +127,11 @@ Resources:
                 passthroughBehavior: WHEN_NO_MATCH
                 httpMethod: POST
                 type: AWS
+                requestParameters:
+                  integration.request.header.Content-Type: "'application/x-amz-json-1.0'"
                 requestTemplates:
                   application/json: "{\n  \"input\": \"$input.json('$')\",\n  \"stateMachineArn\"\
-                    : \"**\"**${TeeAdviceWorkflow}**\"**\n}\n"
+                    : \"${TeeAdviceWorkflow}\"\n}\n"
               responses:
                 '200':
                   description: 200 response
