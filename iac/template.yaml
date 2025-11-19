@@ -85,49 +85,55 @@ Resources:
     Properties:
       StateMachineName: TeeAdviceWorkflow
       RoleArn: !GetAtt SFExecutionRole.Arn
-      DefinitionString: |
-        {
-          "Comment": "Golf Caddie Handicap Calculation and AI Advice Workflow",
-          "StartAt": "CalculateHandicap",
-          "States": {
-            "CalculateHandicap": {
-              "Type": "Task",
-              "Resource": "arn:aws:states:::lambda:invoke",
-              "Parameters": {
-                "FunctionName": "${TeeCalcLambda}",
-                "Payload.$": "$"
+      DefinitionString:
+        # Use !Sub to handle the substitution of the entire JSON string
+        !Sub |
+          {
+            "Comment": "Golf Caddie Handicap Calculation and AI Advice Workflow",
+            "StartAt": "CalculateHandicap",
+            "States": {
+              "CalculateHandicap": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  # CRITICAL FIX: Force the substitution of the full Lambda ARN here
+                  "FunctionName": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${TeeCalcLambda}",
+                  "Payload.$": "$"
+                },
+                "Retry": [{
+                    "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 6,
+                    "BackoffRate": 2
+                }],
+                "Catch": [{
+                    "ErrorEquals": ["States.ALL"],
+                    "Next": "FailedState"
+                }],
+                "Next": "AISuggestionTask"
               },
-              "Retry": [{
-                  "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException"],
-                  "IntervalSeconds": 2,
-                  "MaxAttempts": 6,
-                  "BackoffRate": 2
-              }],
-              "Catch": [{
-                  "ErrorEquals": ["States.ALL"],
-                  "Next": "FailedState"
-              }],
-              "Next": "AISuggestionTask"
-            },
-            "AISuggestionTask": {
-              "Type": "Task",
-              "Resource": "arn:aws:states:::bedrock:invokeModel",
-              "Parameters": {
-                "ModelId": "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet",
-                "ContentType": "application/json",
-                "Accept": "application/json",
-                "Body": {
-                  "prompt.$": "States.Format('Based on Course Handicap {}, suggest a tee strategy.', $.courseHandicap)"
-                }
+              "AISuggestionTask": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::bedrock:invokeModel",
+                "Parameters": {
+                  "ModelId": "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-sonnet",
+                  "ContentType": "application/json",
+                  "Accept": "application/json",
+                  "Body": {
+                    "prompt.$": "States.Format('Based on Course Handicap {}, suggest a tee strategy.', $.courseHandicap)"
+                  }
+                },
+                "Next": "SuccessState"
               },
-              "End": true
-            },
-            "FailedState": {
-              "Type": "Fail",
-              "Cause": "The workflow failed to complete successfully."
+              "SuccessState": {
+                "Type": "Succeed"
+              },
+              "FailedState": {
+                "Type": "Fail",
+                "Cause": "The workflow failed to complete successfully."
+              }
             }
           }
-        }
 
   # --------------------------------------------------------------------------
   # 5. API Gateway (Entry Point)
@@ -200,7 +206,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: '2012-01-17'
         Statement:
           - Effect: Allow
             Principal:
