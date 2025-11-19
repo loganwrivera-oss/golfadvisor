@@ -1,0 +1,162 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31 # Use SAM to simplify Lambda and API Gateway definitions
+
+Parameters:
+  ParValue:
+    Type: Number
+    Default: 72 # Default Par for WHS calculation
+
+Resources:
+  # Deliverable 1.4: DynamoDB Table
+  CourseData:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: CourseData
+      KeySchema:
+        - AttributeName: CourseID
+          KeyType: HASH
+        - AttributeName: TeeMarker
+          KeyType: RANGE
+      AttributeDefinitions:
+        - AttributeName: CourseID
+          AttributeType: S
+        - AttributeName: TeeMarker
+          AttributeType: S
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  # Deliverable 2.3: Lambda Function (Code in src/tee_calc_lambda.py)
+  TeeCalcLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: TeeCalcLambda
+      Handler: tee_calc_lambda.lambda_handler
+      Runtime: python3.9
+      CodeUri: src/
+      Policies: # Deliverable 2.1: Lambda IAM Role Permissions
+        - DynamoDBReadPolicy:
+            TableName: !Ref CourseData
+        - Statement:
+            Effect: Allow
+            Action: "logs:*"
+            Resource: "*"
+
+  # Deliverable 2.2: Step Functions State Machine (Orchestrator)
+  TeeAdviceWorkflow:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: TeeAdviceWorkflow
+      RoleArn: !GetAtt SFExecutionRole.Arn # SF execution role defined below
+      DefinitionString:
+        !Sub |
+          {
+            "StartAt": "CheckForIndex",
+            "States": {
+              "CheckForIndex": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.handicapIndex",
+                    "IsPresent": true,
+                    "Next": "CalculateHandicap"
+                  }
+                ],
+                "Default": "IndexMissingError"
+              },
+              "CalculateHandicap": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${TeeCalcLambda}",
+                  "Payload.$": "$"
+                },
+                "Next": "AISuggestionTask"
+              },
+              "AISuggestionTask": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::bedrock:invokeModel",
+                "Parameters": {
+                  "modelId": "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-v2",
+                  "contentType": "application/json",
+                  "accept": "application/json",
+                  "body": {
+                    "prompt.$": "States.Format('Based on Course Handicap {}, suggest a tee strategy.', $.courseHandicap)"
+                  }
+                },
+                "Next": "SuccessState"
+              },
+              "IndexMissingError": {
+                "Type": "Fail",
+                "Error": "MissingHandicapIndex",
+                "Cause": "Handicap Index is required for this path."
+              },
+              "SuccessState": {
+                "Type": "Succeed"
+              }
+            }
+          }
+
+  # Deliverable 2.1: IAM Role for Step Functions Execution (SF needs permissions for Lambda & Bedrock)
+  SFExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "states.${AWS::Region}.amazonaws.com"
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SFInvokePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                  - bedrock:InvokeModel
+                Resource: "*"
+
+  # Deliverable 2.1: API Gateway (HTTP API definition)
+  TeeAdviceAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: TeeAdviceAPI
+      StageName: Prod
+      DefinitionBody:
+        swagger: '2.0'
+        info:
+          title: "TeeAdviceAPI"
+        paths:
+          /advice:
+            post:
+              x-amazon-apigateway-integration:
+                uri:
+                  !Sub "arn:aws:apigateway:${AWS::Region}:states:action/StartExecution"
+                credentials: !GetAtt APIGWRole.Arn
+                passthroughBehavior: WHEN_NO_MATCH
+                httpMethod: POST
+                type: AWS
+              responses: {}
+
+  # Deliverable 2.1: IAM Role for APIGW to call Step Functions
+  APIGWRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: APIGWInvokeSFPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !GetAtt TeeAdviceWorkflow.Arn
